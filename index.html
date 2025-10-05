@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Moschee TV Display – Graz</title>
+  <style>
+    html, body { margin:0; padding:0; height:100%; font-family: system-ui, -apple-system, Arial, sans-serif; background:#0a0f0f; color:#f3f5f4;}
+    .wrap { display:flex; flex-direction:column; height:100%; }
+    header { display:flex; align-items:center; justify-content:space-between; padding:16px 24px; background:#0f1515; border-bottom:1px solid #1f2a2a; }
+    header .title { font-weight:700; font-size:1.5rem; letter-spacing:.5px;}
+    header .right { display:flex; gap:20px; align-items:center;}
+    .clock { font-variant-numeric: tabular-nums; font-size:1.25rem; }
+    .content { flex:1; display:grid; grid-template-columns: 1.2fr 1.2fr 1fr; gap:16px; padding:16px; }
+    .card { background:#111a1a; border:1px solid #1f2a2a; border-radius:12px; padding:16px; box-shadow: 0 0 0 1px rgba(255,255,255,0.02) inset;}
+    .card h2 { margin:0 0 10px 0; font-size:1.1rem; letter-spacing:.3px; }
+    .times { width:100%; border-collapse:collapse; }
+    .times th, .times td { padding:10px 8px; text-align:left; border-bottom:1px solid #1f2a2a; font-variant-numeric: tabular-nums; }
+    .times tr.highlight { background:#142222; }
+    .badge { display:inline-block; padding:4px 8px; border-radius:6px; background:#173131; font-size:.8rem; margin-left:8px; }
+    .next { font-size:1.8rem; font-weight:700; margin-top:6px; }
+    .countdown { font-size:1rem; opacity:.9; }
+    .weather-grid { display:grid; grid-template-columns: 1fr 1fr; gap:12px; }
+    .weather-now { font-size:2.2rem; font-weight:700; }
+    .small { opacity:.8; }
+    .daily { display:grid; grid-template-columns: repeat(4, 1fr); gap:10px; }
+    .day { background:#0f1717; border:1px solid #1f2a2a; border-radius:10px; padding:10px; text-align:center; }
+    footer { padding:10px 16px; background:#0f1515; border-top:1px solid #1f2a2a; }
+    .ticker { width:100%; white-space:nowrap; overflow:hidden; box-sizing:border-box; }
+    .ticker span { display:inline-block; padding-left:100%; animation: scroll 30s linear infinite; }
+    @keyframes scroll { 0% { transform: translateX(0);} 100% { transform: translateX(-100%);} }
+    .logo { font-weight:800; background:#b30000; color:#fff; padding:6px 10px; border-radius:8px; }
+    .muted { color:#a7b3b3; font-size:.9rem; }
+    @media(max-width:1100px){
+      .content{ grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="title"><span class="logo">atib</span> &nbsp;Graz Camii – Aile & Evlilik Okulu Bilgilendirme Ekranı</div>
+    <div class="right">
+      <div id="date" class="muted">—</div>
+      <div id="clock" class="clock">--:--</div>
+    </div>
+  </header>
+
+  <div class="content">
+    <section class="card" id="prayerCard">
+      <h2>🕋 Namaz Vakitleri <span class="badge" id="cityBadge">Graz</span></h2>
+      <div class="next">Sıradaki: <span id="nextPrayer">—</span></div>
+      <div class="countdown" id="countdown">—</div>
+      <table class="times" id="timesTable">
+        <thead><tr><th>Vakit</th><th>Saat</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <div class="muted" id="sourceInfo">Kaynak: Aladhan (Diyanet yöntemi 13)</div>
+    </section>
+
+    <section class="card" id="annCard">
+      <h2>📢 Duyurular</h2>
+      <ul id="annList">
+        <li>Yükleniyor…</li>
+      </ul>
+      <div class="muted" style="margin-top:8px;">Duyuruları config.json içinden güncelleyebilirsiniz.</div>
+    </section>
+
+    <section class="card" id="weatherCard">
+      <h2>🌦️ Hava Durumu – Graz</h2>
+      <div class="weather-grid">
+        <div>
+          <div class="weather-now" id="tempNow">—°C</div>
+          <div id="weatherDesc" class="small">Yükleniyor…</div>
+        </div>
+        <div class="small" id="weatherMeta">—</div>
+      </div>
+      <div style="margin-top:10px;" class="daily" id="dailyWeather"></div>
+      <div class="muted" style="margin-top:8px;">Kaynak: open-meteo.com</div>
+    </section>
+  </div>
+
+  <footer>
+    <div class="ticker"><span id="tickerText">Hoş geldiniz — Bu ekran otomatik olarak güncellenir. Aile & Evlilik Okulu kayıtları başlamıştır. Sorular için cami irtibat görevlisine başvurunuz.</span></div>
+  </footer>
+</div>
+
+<script>
+const CONFIG = {
+  city: "Graz",
+  country: "Austria",
+  latitude: 47.0707,
+  longitude: 15.4395,
+  timezone: "Europe/Vienna",
+  method: 13 // Diyanet
+};
+
+const PRAYER_ORDER = ["Fajr","Sunrise","Dhuhr","Asr","Maghrib","Isha"];
+const PRAYER_LABELS_TR = {
+  "Fajr":"Sabah",
+  "Sunrise":"Güneş",
+  "Dhuhr":"Öğle",
+  "Asr":"İkindi",
+  "Maghrib":"Akşam",
+  "Isha":"Yatsı"
+};
+
+// Clock & Date
+function pad(n){ return n.toString().padStart(2,"0"); }
+function setClock(){
+  const now = new Date();
+  document.getElementById("clock").textContent = pad(now.getHours())+":"+pad(now.getMinutes());
+  const f = now.toLocaleDateString('tr-TR', { weekday:'long', year:'numeric', month:'long', day:'numeric' });
+  document.getElementById("date").textContent = f;
+}
+setInterval(setClock, 1000); setClock();
+
+// Fetch announcements
+async function loadAnnouncements(){
+  try{
+    const resp = await fetch("config.json?_="+Date.now());
+    const data = await resp.json();
+    const list = document.getElementById("annList");
+    list.innerHTML = "";
+    (data.announcements || []).forEach(a=>{
+      const li = document.createElement("li"); li.textContent = a; list.appendChild(li);
+    });
+    const t = (data.ticker && data.ticker.length) ? data.ticker.join("   •   ") : "Camimize hoş geldiniz.";
+    document.getElementById("tickerText").textContent = t;
+  }catch(e){
+    document.getElementById("annList").innerHTML = "<li>Duyurular yüklenemedi.</li>";
+  }
+}
+
+// Fetch prayer times via Aladhan
+async function loadPrayerTimes(){
+  document.getElementById("cityBadge").textContent = CONFIG.city;
+  const url = `https://api.aladhan.com/v1/timingsByCity?city=${encodeURIComponent(CONFIG.city)}&country=${encodeURIComponent(CONFIG.country)}&method=${CONFIG.method}&school=0`;
+  const res = await fetch(url);
+  const json = await res.json();
+  if(json.code !== 200){ throw new Error("Vakit alınamadı"); }
+  const t = json.data.timings;
+  const order = PRAYER_ORDER;
+  const tbody = document.querySelector("#timesTable tbody");
+  tbody.innerHTML = "";
+  order.forEach(key=>{
+    const tr = document.createElement("tr");
+    tr.dataset.key = key;
+    const name = PRAYER_LABELS_TR[key] || key;
+    const time = t[key];
+    tr.innerHTML = `<td>${name}</td><td>${time}</td>`;
+    tbody.appendChild(tr);
+  });
+  computeNext(t);
+}
+
+function toTodayDate(timeStr){
+  const [h,m] = timeStr.split(":").map(Number);
+  const d = new Date();
+  d.setHours(h, m, 0, 0);
+  return d;
+}
+
+let nextTimer = null;
+function computeNext(timings){
+  if(nextTimer){ clearInterval(nextTimer); }
+  const now = new Date();
+  const upcoming = [];
+  PRAYER_ORDER.forEach(k=>{
+    const d = toTodayDate(timings[k]);
+    if(d > now){ upcoming.push({k, d}); }
+  });
+  let next;
+  if(upcoming.length){
+    next = upcoming[0];
+  }else{
+    // next is tomorrow's Fajr
+    const tmr = new Date(); tmr.setDate(tmr.getDate()+1); tmr.setHours(0,0,0,0);
+    const [fh,fm] = (timings["Fajr"] || "05:00").split(":").map(Number);
+    next = { k:"Fajr", d: new Date(tmr.getFullYear(), tmr.getMonth(), tmr.getDate(), fh, fm, 0, 0) };
+  }
+  const label = PRAYER_LABELS_TR[next.k] || next.k;
+  document.getElementById("nextPrayer").textContent = label + " (" + pad(next.d.getHours())+":"+pad(next.d.getMinutes()) + ")";
+  document.querySelectorAll("#timesTable tbody tr").forEach(tr=> tr.classList.remove("highlight"));
+  const target = document.querySelector(`#timesTable tbody tr[data-key='${next.k}']`);
+  if(target) target.classList.add("highlight");
+
+  function updateCountdown(){
+    const now = new Date();
+    let diff = (next.d - now) / 1000; if(diff < 0) diff = 0;
+    const hh = Math.floor(diff/3600); diff%=3600;
+    const mm = Math.floor(diff/60); const ss = Math.floor(diff%60);
+    document.getElementById("countdown").textContent = `Kalan: ${pad(hh)}:${pad(mm)}:${pad(ss)}`;
+  }
+  updateCountdown();
+  nextTimer = setInterval(updateCountdown, 1000);
+}
+
+// Weather from Open-Meteo
+function weatherCodeToText(code){
+  const map = {
+    0:"Açık", 1:"Az bulutlu", 2:"Parçalı bulutlu", 3:"Bulutlu",
+    45:"Sis", 48:"Kırağılı sis",
+    51:"Çise", 53:"Çise", 55:"Yoğun çise",
+    61:"Hafif yağmur", 63:"Yağmur", 65:"Kuvvetli yağmur",
+    71:"Hafif kar", 73:"Kar", 75:"Kuvvetli kar",
+    80:"Sağanak", 81:"Kuvvetli sağanak", 82:"Çok kuvvetli sağanak",
+    95:"Gök gürültülü", 96:"Gök gürültülü + dolu", 99:"Gök gürültülü + yoğun dolu"
+  };
+  return map[code] || "Hava";
+}
+
+async function loadWeather(){
+  const url = `https://api.open-meteo.com/v1/forecast?latitude=${CONFIG.latitude}&longitude=${CONFIG.longitude}&current=temperature_2m,weather_code&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=${encodeURIComponent(CONFIG.timezone)}`;
+  const res = await fetch(url);
+  const data = await res.json();
+  const temp = Math.round(data.current.temperature_2m);
+  const desc = weatherCodeToText(data.current.weather_code);
+  document.getElementById("tempNow").textContent = `${temp}°C`;
+  document.getElementById("weatherDesc").textContent = desc;
+  document.getElementById("weatherMeta").textContent = `Maks/Min ve yağış ihtimali (önümüzdeki günler)`;
+  const dailyEl = document.getElementById("dailyWeather");
+  dailyEl.innerHTML = "";
+  const days = data.daily.time;
+  for(let i=0; i<Math.min(days.length,4); i++){
+    const d = new Date(days[i]);
+    const name = d.toLocaleDateString('tr-TR', { weekday:'short' });
+    const tmax = Math.round(data.daily.temperature_2m_max[i]);
+    const tmin = Math.round(data.daily.temperature_2m_min[i]);
+    const pr = data.daily.precipitation_probability_max[i];
+    const div = document.createElement("div");
+    div.className = "day";
+    div.innerHTML = `<div style="font-weight:700">${name}</div>
+      <div style="font-size:1.1rem">${tmax}° / ${tmin}°</div>
+      <div class="small">Yağış: %${pr ?? '-'}</div>`;
+    dailyEl.appendChild(div);
+  }
+}
+
+// Init
+loadAnnouncements();
+loadPrayerTimes();
+loadWeather();
+setInterval(()=>{ loadPrayerTimes(); loadWeather(); loadAnnouncements(); }, 15*60*1000); // 15 dk'da bir yenile
+</script>
+</body>
+</html>
